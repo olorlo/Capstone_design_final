@@ -1,0 +1,110 @@
+#include <Wire.h>
+#include <BH1750.h>
+#include <RTClib.h>
+#include "Adafruit_SGP30.h"
+//사용 센서(BH1750, YL-83, DS3231, SGP30)
+
+
+#define WATER_SENSOR_PIN 15  // YL-83 디지털 핀
+
+BH1750 lightMeter;
+RTC_DS3231 rtc;
+Adafruit_SGP30 sgp;
+
+bool prevWaterDetected = false;
+bool rtcOK = false;
+bool bh1750OK = false;
+bool sgp30OK = false;
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);  // Serial 안정화
+
+  Serial.println("시작 중...");
+
+  // UART1 (라즈베리파이 전송용)
+  Serial1.begin(115200, SERIAL_8N1, -1, 17); // TX only
+
+  // I2C 시작 (SDA=21, SCL=22)
+  Wire.begin(21, 22);
+
+  // YL-83 핀 모드
+  pinMode(WATER_SENSOR_PIN, INPUT);
+
+  // RTC 초기화
+  if (rtc.begin()) {
+    rtcOK = true;
+    Serial.println("RTC 초기화 성공");
+    if (rtc.lostPower()) {
+      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+      Serial.println("RTC 시간 초기화됨");
+    }
+  } else {
+    Serial.println("RTC 초기화 실패");
+  }
+
+  // BH1750 초기화
+  if (lightMeter.begin()) {
+    bh1750OK = true;
+    Serial.println("BH1750 초기화 성공");
+  } else {
+    Serial.println("BH1750 초기화 실패");
+  }
+
+  // SGP30 초기화
+  if (sgp.begin()) {
+    sgp30OK = true;
+    Serial.println("SGP30 초기화 성공");
+  } else {
+    Serial.println("SGP30 초기화 실패");
+  }
+
+  Serial.println("설정 완료. 루프 시작.");
+}
+
+void loop() {
+  bool waterDetected = digitalRead(WATER_SENSOR_PIN) == LOW;
+
+  if (waterDetected && !prevWaterDetected) {
+    String msg = "물 감지됨! ";
+
+    // RTC 시각
+    if (rtcOK) {
+      DateTime now = rtc.now();
+      msg += "시각: ";
+      msg += now.timestamp(DateTime::TIMESTAMP_FULL);
+      msg += ", ";
+    } else {
+      msg += "RTC 없음, ";
+    }
+
+    // BH1750 조도
+    if (bh1750OK) {
+      float lux = lightMeter.readLightLevel();
+      msg += "조도: ";
+      msg += String(lux) + " lx, ";
+    } else {
+      msg += "조도센서 없음, ";
+    }
+
+    // SGP30 공기질
+    if (sgp30OK) {
+      if (sgp.IAQmeasure()) {
+        msg += "TVOC: " + String(sgp.TVOC) + " ppb, ";
+        msg += "eCO2: " + String(sgp.eCO2) + " ppm";
+      } else {
+        msg += "SGP30 측정 실패";
+      }
+    } else {
+      msg += "SGP30 없음";
+    }
+
+    // 시리얼 출력 및 라즈베리파이 전송
+    Serial.println(msg);
+    Serial1.println(msg);
+  }
+
+  prevWaterDetected = waterDetected;
+
+  delay(1000);  // 1초마다 체크
+}
